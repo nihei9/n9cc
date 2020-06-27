@@ -1,0 +1,5 @@
+*~
+*.o
+tmp*
+a.out
+n9cc
