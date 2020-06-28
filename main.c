@@ -7,6 +7,7 @@
 
 typedef enum {
 			  TK_RESERVED,
+			  TK_IDENT,
 			  TK_NUM,
 			  TK_EOF,
 } TokenKind;
@@ -51,7 +52,7 @@ void error(char *fmt, ...) {
 	exit(1);
 }
 
-// consume  consumes a token and returns true when the the token now focused on is
+// consume consumes a token and returns true when the the token now focused on is
 // equal to specified symbol. Otherwise, don't consume and returns false.
 bool consume(char *op) {
 	if (token->kind != TK_RESERVED || token->len != strlen(op)
@@ -62,12 +63,23 @@ bool consume(char *op) {
 	return true;
 }
 
+// consume consumes a token and returns it when the the token now focused on is
+// an identifier. Otherwise, don't consume and returns NULL.
+Token *consume_ident() {
+	if (token->kind != TK_IDENT) {
+		return NULL;
+	}
+	Token *tok = token;
+	token = token->next;
+	return tok;
+}
+
 // expect checks whether the token now focused on is equal to a specified symbol.
 // If the check passed, it consumes the token. Otherwise, it reports an error and exits.
 void expect(char *op) {
 	if (token->kind != TK_RESERVED || token->len != strlen(op)
 		|| memcmp(token->str, op, token->len)) {
-		error_at(token->str, "expected '%c'", op);
+		error_at(token->str, "expected '%s'", op);
 	}
 	token = token->next;
 }
@@ -116,6 +128,11 @@ Token *tokenize() {
 			continue;
 		}
 
+		if (*p >= 'a' && *p <= 'z') {
+			cur = new_token(TK_IDENT, cur, p++, 1);
+			continue;
+		}
+
 		if (startswith(p, "==") || startswith(p, "!=")
 			|| startswith(p, "<=") || startswith(p, ">=")) {
 			cur = new_token(TK_RESERVED, cur, p, 2);
@@ -123,7 +140,7 @@ Token *tokenize() {
 			continue;
 		}
 
-		if (strchr("<>+-*/()", *p)) {
+		if (strchr("<>+-*/()=;", *p)) {
 			cur = new_token(TK_RESERVED, cur, p++, 1);
 			continue;
 		}
@@ -159,15 +176,17 @@ void print_tokens() {
 }
 
 typedef enum {
-			  ND_EQ,
-			  ND_NE,
-			  ND_LT,
-			  ND_LE,
-			  ND_ADD,
-			  ND_SUB,
-			  ND_MUL,
-			  ND_DIV,
-			  ND_NUM,
+			  ND_EQ,     // ==
+			  ND_NE,     // !=
+			  ND_LT,     // <
+			  ND_LE,     // <=
+			  ND_ADD,    // +
+			  ND_SUB,    // -
+			  ND_MUL,    // *
+			  ND_DIV,    // /
+			  ND_ASSIGN, // =
+			  ND_LVAR,   // local variable
+			  ND_NUM,    // integer
 } NodeKind;
 
 typedef struct Node Node;
@@ -178,6 +197,7 @@ struct Node {
 	Node *lhs;
 	Node *rhs;
 	int val;
+	int offset;
 };
 
 // new_node returns a new node.
@@ -197,6 +217,10 @@ Node *new_node_num(int val) {
 	return node;
 }
 
+void program();
+Node *stmt();
+Node *expr();
+Node *assign();
 Node *equality();
 Node *relational();
 Node *add();
@@ -204,9 +228,37 @@ Node *mul();
 Node *unary();
 Node *primary();
 
+Node *code[100];
+
+// program = expr*
+void program() {
+	int i = 0;
+	while (!at_eof()) {
+		code[i++] = stmt();
+	}
+	code[i] = NULL;
+}
+
+// stmt = expr ";"
+Node *stmt() {
+	Node *node = expr();
+	expect(";");
+	return node;
+}
+
 // expr = equality
 Node *expr() {
-	return equality();
+	return assign();
+}
+
+// assign = equality ("=" assign)?
+Node *assign() {
+	Node *node = equality();
+
+	if (consume("=")) {
+		node = new_node(ND_ASSIGN, node, assign());
+	}
+	return node;
 }
 
 // equality = relational ("==" relational | "!=" relational)*
@@ -293,13 +345,47 @@ Node *primary() {
 		return node;
 	}
 
+	Token *tok = consume_ident();
+	if (tok) {
+		Node *node = calloc(1, sizeof(Node));
+		node->kind = ND_LVAR;
+		node->offset = (tok->str[0] - 'a' + 1) * 8;
+		return node;
+	}
+
 	return new_node_num(expect_number());
+}
+
+void gen_lval(Node *node) {
+	if (node->kind != ND_LVAR) {
+		error("left value must be a variable");
+	}
+
+	printf("  mov rax, rbp\n");
+	printf("  sub rax, %d\n", node->offset);
+	printf("  push rax\n");
 }
 
 // gen generates asembly.
 void gen(Node *node) {
-	if (node->kind == ND_NUM) {
+	switch (node->kind) {
+	case ND_NUM:
 		printf("  push %d\n", node->val);
+		return;
+	case ND_LVAR:
+		gen_lval(node);
+		printf("  pop rax\n");
+		printf("  mov rax, [rax]\n");
+		printf("  push rax\n");
+		return;
+	case ND_ASSIGN:
+		gen_lval(node->lhs);
+		gen(node->rhs);
+
+		printf("  pop rdi\n");
+		printf("  pop rax\n");
+		printf("  mov [rax], rdi\n");
+		printf("  push rdi\n");
 		return;
 	}
 
@@ -357,15 +443,24 @@ int main(int argc, char **argv) {
 	user_input = argv[1];
 	token = tokenize();
 	//	print_tokens();
-	Node *node = expr();
+	program();
 
 	printf(".intel_syntax noprefix\n");
 	printf(".global main\n");
 	printf("main:\n");
 
-	gen(node);
+	printf("  push rbp\n");
+	printf("  mov rbp, rsp\n");
+	printf("  sub rsp, 208\n");
 
-	printf("  pop rax\n");
+	for (int i = 0; code[i]; i++) {
+		gen(code[i]);
+
+		printf("  pop rax\n");
+	}
+
+	printf("  mov rsp, rbp\n");
+	printf("  pop rbp\n");
 	printf("  ret\n");
 	return 0;
 }
