@@ -128,8 +128,14 @@ Token *tokenize() {
 			continue;
 		}
 
-		if (*p >= 'a' && *p <= 'z') {
-			cur = new_token(TK_IDENT, cur, p++, 1);
+		if (isalpha(*p)) {
+			char *start = p;
+			int len = 0;
+			do {
+				len++;
+				p++;
+			} while (isalnum(*p));
+			cur = new_token(TK_IDENT, cur, start, len);
 			continue;
 		}
 
@@ -215,6 +221,26 @@ Node *new_node_num(int val) {
 	node->kind = ND_NUM;
 	node->val = val;
 	return node;
+}
+
+typedef struct LVar LVar;
+
+struct LVar {
+	LVar *next;
+	char *name;
+	int len;
+	int offset;
+};
+
+LVar *locals;
+
+LVar *find_lvar(Token *tok) {
+	for (LVar *var = locals; var; var = var->next) {
+		if (var->len == tok->len && !memcmp(tok->str, var->name, var->len)) {
+			return var;
+		}
+	}
+	return NULL;
 }
 
 void program();
@@ -349,7 +375,24 @@ Node *primary() {
 	if (tok) {
 		Node *node = calloc(1, sizeof(Node));
 		node->kind = ND_LVAR;
-		node->offset = (tok->str[0] - 'a' + 1) * 8;
+
+		LVar *lvar = find_lvar(tok);
+		if (lvar) {
+			node->offset = lvar->offset;
+		} else {
+			lvar = calloc(1, sizeof(LVar));
+			lvar->next = locals;
+			lvar->name = tok->str;
+			lvar->len = tok->len;
+			if (locals) {
+				lvar->offset = locals->offset + 8;
+			} else {
+				lvar->offset = 8;
+			}
+			locals = lvar;
+			node->offset = lvar->offset;
+		}
+
 		return node;
 	}
 
@@ -439,7 +482,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "n9cc is required 2 parameters");
 		return 1;
 	}
-
+	
 	user_input = argv[1];
 	token = tokenize();
 	//	print_tokens();
@@ -451,7 +494,10 @@ int main(int argc, char **argv) {
 
 	printf("  push rbp\n");
 	printf("  mov rbp, rsp\n");
-	printf("  sub rsp, 208\n");
+	
+	if (locals) {
+		printf("  sub rsp, %d\n", locals->offset);
+	}
 
 	for (int i = 0; code[i]; i++) {
 		gen(code[i]);

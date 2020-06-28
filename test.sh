@@ -55,5 +55,6 @@ assert 10 "a=100;b=10;"
 assert 10 "a=100;a-90;"
 assert 10 "a=b=100;b-90;"
 assert 10 "a=90;b=100;b-a;"
+assert 10 "foo=90;bar=100;bar-foo;"
 
 echo OK
