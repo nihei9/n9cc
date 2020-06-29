@@ -8,6 +8,7 @@
 typedef enum {
 			  TK_RESERVED,
 			  TK_RETURN,
+			  TK_IF,
 			  TK_IDENT,
 			  TK_NUM,
 			  TK_EOF,
@@ -142,6 +143,11 @@ Token *tokenize() {
 			p += 6;
 			continue;
 		}
+		if (strncmp(p, "if", 2) == 0 && !isalpha(*(p + 2))) {
+			cur = new_token(TK_IF, cur, p, 2);
+			p += 2;
+			continue;
+		}
 
 		if (isalpha(*p)) {
 			char *start = p;
@@ -189,6 +195,9 @@ void print_tokens() {
 		case TK_RETURN:
 			printf("  TK_RETURN\n");
 			break;
+		case TK_IF:
+			printf("  TK_IF\n");
+			break;
 		case TK_IDENT:
 			printf("  TK_IDENT\n");
 			break;
@@ -215,6 +224,7 @@ typedef enum {
 			  ND_LVAR,   // local variable
 			  ND_NUM,    // integer
 			  ND_RETURN, // return
+			  ND_IF,     // if
 } NodeKind;
 
 typedef struct Node Node;
@@ -226,6 +236,7 @@ struct Node {
 	Node *rhs;
 	int val;
 	int offset;
+	int label_num;
 };
 
 // new_node returns a new node.
@@ -277,6 +288,7 @@ Node *unary();
 Node *primary();
 
 Node *code[100];
+int label_num;
 
 // program = stmt*
 void program() {
@@ -289,13 +301,23 @@ void program() {
 
 // stmt = expr ";"
 //      | "return" expr ";"
+//      | "if" "(" expr ")" stmt
 Node *stmt() {
-	Node *node;
 	if (consume_kw(TK_RETURN)) {
-		node = new_node(ND_RETURN, expr(), NULL);
-	} else {
-		node = expr();
+		Node *node = new_node(ND_RETURN, expr(), NULL);
+		expect(";");
+		return node;
+	} else if (consume_kw(TK_IF)) {
+		expect("(");
+		Node *cond_node = expr();
+		expect(")");
+		Node *stmt_node = stmt();
+		Node *if_node = new_node(ND_IF, cond_node, stmt_node);
+		if_node->label_num = label_num++;
+		return if_node;
 	}
+	
+	Node *node = expr();
 	expect(";");
 	return node;
 }
@@ -467,6 +489,14 @@ void gen(Node *node) {
 		printf("  mov rsp, rbp\n");
 		printf("  pop rbp\n");
 		printf("  ret\n");
+		return;
+	case ND_IF:
+		gen(node->lhs);
+		printf("  pop rax\n");
+		printf("  cmp rax, 0\n");
+		printf("  je .L%d\n", node->label_num);
+		gen(node->rhs);
+		printf(".L%d:\n", node->label_num);
 		return;
 	}
 

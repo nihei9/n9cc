@@ -62,4 +62,9 @@ assert 1 "return 1; return 0;"
 assert 1 "returnx=1;" # 'returnx' is an identifier, not 'return' keyword.
 assert 1 "return1;"
 
+assert 0 "a=100; if(a > 0) return 0; return 1;"
+assert 1 "a=100; if(a > 100) return 0; return 1;"
+assert 0 "a=100; b=200; if(a > 0) if(b > 100) return 0; return 1;"
+assert 1 "a=100; b=200; if(a > 0) if(b > 200) return 0; return 1;"
+
 echo OK
