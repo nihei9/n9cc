@@ -57,4 +57,9 @@ assert 10 "a=b=100;b-90;"
 assert 10 "a=90;b=100;b-a;"
 assert 10 "foo=90;bar=100;bar-foo;"
 
+assert 1 "0; return 1;"
+assert 1 "return 1; return 0;"
+assert 1 "returnx=1;" # 'returnx' is an identifier, not 'return' keyword.
+assert 1 "return1;"
+
 echo OK

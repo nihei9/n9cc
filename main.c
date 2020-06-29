@@ -7,6 +7,7 @@
 
 typedef enum {
 			  TK_RESERVED,
+			  TK_RETURN,
 			  TK_IDENT,
 			  TK_NUM,
 			  TK_EOF,
@@ -61,6 +62,14 @@ bool consume(char *op) {
 	}
 	token = token->next;
 	return true;
+}
+
+bool consume_kw(TokenKind kind) {
+	if (token->kind == kind) {
+		token = token->next;
+		return true;
+	}
+	return false;
 }
 
 // consume consumes a token and returns it when the the token now focused on is
@@ -128,6 +137,12 @@ Token *tokenize() {
 			continue;
 		}
 
+		if (strncmp(p, "return", 6) == 0 && !isalpha(*(p + 6))) {
+			cur = new_token(TK_RETURN, cur, p, 6);
+			p += 6;
+			continue;
+		}
+
 		if (isalpha(*p)) {
 			char *start = p;
 			int len = 0;
@@ -171,6 +186,12 @@ void print_tokens() {
 		case TK_RESERVED:
 			printf("  TK_RESERVED\n");
 			break;
+		case TK_RETURN:
+			printf("  TK_RETURN\n");
+			break;
+		case TK_IDENT:
+			printf("  TK_IDENT\n");
+			break;
 		case TK_NUM:
 			printf("  TK_NUM %d\n", tok->val);
 			break;
@@ -193,6 +214,7 @@ typedef enum {
 			  ND_ASSIGN, // =
 			  ND_LVAR,   // local variable
 			  ND_NUM,    // integer
+			  ND_RETURN, // return
 } NodeKind;
 
 typedef struct Node Node;
@@ -256,7 +278,7 @@ Node *primary();
 
 Node *code[100];
 
-// program = expr*
+// program = stmt*
 void program() {
 	int i = 0;
 	while (!at_eof()) {
@@ -266,8 +288,14 @@ void program() {
 }
 
 // stmt = expr ";"
+//      | "return" expr ";"
 Node *stmt() {
-	Node *node = expr();
+	Node *node;
+	if (consume_kw(TK_RETURN)) {
+		node = new_node(ND_RETURN, expr(), NULL);
+	} else {
+		node = expr();
+	}
 	expect(";");
 	return node;
 }
@@ -411,6 +439,10 @@ void gen_lval(Node *node) {
 
 // gen generates asembly.
 void gen(Node *node) {
+	if (node == NULL) {
+		return;
+	}
+
 	switch (node->kind) {
 	case ND_NUM:
 		printf("  push %d\n", node->val);
@@ -424,11 +456,17 @@ void gen(Node *node) {
 	case ND_ASSIGN:
 		gen_lval(node->lhs);
 		gen(node->rhs);
-
 		printf("  pop rdi\n");
 		printf("  pop rax\n");
 		printf("  mov [rax], rdi\n");
 		printf("  push rdi\n");
+		return;
+	case ND_RETURN:
+		gen(node->lhs);
+		printf("  pop rax\n");
+		printf("  mov rsp, rbp\n");
+		printf("  pop rbp\n");
+		printf("  ret\n");
 		return;
 	}
 
