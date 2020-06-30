@@ -11,6 +11,7 @@ typedef enum {
 			  TK_IF,
 			  TK_ELSE,
 			  TK_WHILE,
+			  TK_FOR,
 			  TK_IDENT,
 			  TK_NUM,
 			  TK_EOF,
@@ -160,6 +161,11 @@ Token *tokenize() {
 			p += 5;
 			continue;
 		}
+		if (strncmp(p, "for", 3) == 0 && !isalpha(*(p + 3))) {
+			cur = new_token(TK_FOR, cur, p, 3);
+			p += 3;
+			continue;
+		}
 		
 		if (isalpha(*p)) {
 			char *start = p;
@@ -226,6 +232,9 @@ void print_tokens() {
 		case TK_WHILE:
 			printf("  TK_WHILE\n");
 			break;
+		case TK_FOR:
+			printf("  TK_FOR\n");
+			break;
 		case TK_IDENT:
 			printf("  TK_IDENT %s\n", symbol);
 			break;
@@ -254,6 +263,7 @@ typedef enum {
 			  ND_RETURN, // return
 			  ND_IF,     // if
 			  ND_WHILE,  // while
+			  ND_FOR,    // for
 } NodeKind;
 
 typedef struct Node Node;
@@ -263,7 +273,8 @@ struct Node {
 	NodeKind kind;
 	Node *lhs;
 	Node *rhs;
-	Node *opt; // when kind is TK_IF, its else clause
+	Node *opt1;
+	Node *opt2;
 	int val;
 	int offset;
 	int label_num;
@@ -284,7 +295,18 @@ Node *new_node_if(Node *cond, Node *true_stmt, Node *false_stmt) {
 	node->kind = ND_IF;
 	node->lhs = cond;
 	node->rhs = true_stmt;
-	node->opt = false_stmt;
+	node->opt1 = false_stmt;
+	return node;
+}
+
+// new_node_for returns a new for statment node.
+Node *new_node_for(Node *init, Node *cond, Node *increment, Node *stmt) {
+	Node *node = calloc(1, sizeof(Node));
+	node->kind = ND_FOR;
+	node->lhs = init;
+	node->rhs = cond;
+	node->opt1 = increment;
+	node->opt2 = stmt;
 	return node;
 }
 
@@ -343,6 +365,7 @@ void program() {
 //      | "return" expr ";"
 //      | "if" "(" expr ")" stmt ("else" stmt)?
 //      | "while" "(" expr ")" stmt
+//      | "for" "(" expr? ";" expr? ";" expr? ")" stmt
 Node *stmt() {
 	if (consume_kw(TK_RETURN)) {
 		Node *node = new_node(ND_RETURN, expr(), NULL);
@@ -367,6 +390,26 @@ Node *stmt() {
 		Node *while_node = new_node(ND_WHILE, cond_node, stmt());
 		while_node->label_num = label_num++;
 		return while_node;
+	} else if (consume_kw(TK_FOR)) {
+		expect("(");
+		Node *init_node = NULL;
+		if (!consume(";")) {
+			init_node = expr();
+			expect(";");
+		}
+		Node *cond_node = NULL;
+		if (!consume(";")) {
+			cond_node = expr();
+			expect(";");
+		}
+		Node *increment_node = NULL;
+		if (!consume(")")) {
+			increment_node = expr();
+			expect(")");
+		}
+		Node *for_node = new_node_for(init_node, cond_node, increment_node, stmt());
+		for_node->label_num = label_num++;
+		return for_node;
 	}
 	
 	Node *node = expr();
@@ -545,16 +588,16 @@ void gen(Node *node) {
 	case ND_IF:
 		// lhs: condition
 		// rhs: statement to execute when condition is true (if clause)
-		// opt: statement to execute when condition is false (else clause)
+		// opt1: statement to execute when condition is false (else clause) (optional)
 		gen(node->lhs);
-		if (node->opt) {
+		if (node->opt1) {
 			printf("  pop rax\n");
 			printf("  cmp rax, 0\n");
 			printf("  je .Lelse%d\n", node->label_num);
 			gen(node->rhs);
 			printf("  jmp .Lend%d\n", node->label_num);
 			printf(".Lelse%d:\n", node->label_num);
-			gen(node->opt);
+			gen(node->opt1);
 			printf(".Lend%d:\n", node->label_num);
 		} else {
 			printf("  pop rax\n");
@@ -575,6 +618,26 @@ void gen(Node *node) {
 		gen(node->rhs);
 		printf("  jmp .Lbegin%d\n", node->label_num);
 		printf(".Lend%d:\n", node->label_num);
+		return;
+	case ND_FOR:
+		// lhs: init (optional)
+		// rhs: condition (optional)
+		// opt1: increment (optional)
+		// opt2: statement to execute when condition is true
+		gen(node->lhs);
+		printf(".Lbegin%d:\n", node->label_num);
+		if (node->rhs) {
+			gen(node->rhs);
+			printf("  pop rax\n");
+			printf("  cmp rax, 0\n");
+			printf("  je .Lend%d\n", node->label_num);
+		}
+		gen(node->opt2);
+		gen(node->opt1);
+		printf("  jmp .Lbegin%d\n", node->label_num);
+		if (node->rhs) {
+			printf(".Lend%d:\n", node->label_num);
+		}
 		return;
 	}
 
