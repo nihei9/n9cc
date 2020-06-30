@@ -10,6 +10,7 @@ typedef enum {
 			  TK_RETURN,
 			  TK_IF,
 			  TK_ELSE,
+			  TK_WHILE,
 			  TK_IDENT,
 			  TK_NUM,
 			  TK_EOF,
@@ -154,7 +155,12 @@ Token *tokenize() {
 			p += 4;
 			continue;
 		}
-
+		if (strncmp(p, "while", 5) == 0 && !isalpha(*(p + 5))) {
+			cur = new_token(TK_WHILE, cur, p, 5);
+			p += 5;
+			continue;
+		}
+		
 		if (isalpha(*p)) {
 			char *start = p;
 			int len = 0;
@@ -217,6 +223,9 @@ void print_tokens() {
 		case TK_ELSE:
 			printf("  TK_ELSE\n");
 			break;
+		case TK_WHILE:
+			printf("  TK_WHILE\n");
+			break;
 		case TK_IDENT:
 			printf("  TK_IDENT %s\n", symbol);
 			break;
@@ -244,6 +253,7 @@ typedef enum {
 			  ND_NUM,    // integer
 			  ND_RETURN, // return
 			  ND_IF,     // if
+			  ND_WHILE,  // while
 } NodeKind;
 
 typedef struct Node Node;
@@ -332,6 +342,7 @@ void program() {
 // stmt = expr ";"
 //      | "return" expr ";"
 //      | "if" "(" expr ")" stmt ("else" stmt)?
+//      | "while" "(" expr ")" stmt
 Node *stmt() {
 	if (consume_kw(TK_RETURN)) {
 		Node *node = new_node(ND_RETURN, expr(), NULL);
@@ -349,6 +360,13 @@ Node *stmt() {
 		Node *if_node = new_node_if(cond_node, true_stmt_node, false_stmt_node);
 		if_node->label_num = label_num++;
 		return if_node;
+	} else if (consume_kw(TK_WHILE)) {
+		expect("(");
+		Node *cond_node = expr();
+		expect(")");
+		Node *while_node = new_node(ND_WHILE, cond_node, stmt());
+		while_node->label_num = label_num++;
+		return while_node;
 	}
 	
 	Node *node = expr();
@@ -545,6 +563,18 @@ void gen(Node *node) {
 			gen(node->rhs);
 			printf(".Lend%d:\n", node->label_num);
 		}
+		return;
+	case ND_WHILE:
+		// lhs: condition
+		// rhs: statement to execute when condition is true
+		printf(".Lbegin%d:\n", node->label_num);
+		gen(node->lhs);
+		printf("  pop rax\n");
+		printf("  cmp rax, 0\n");
+		printf("  je .Lend%d\n", node->label_num);
+		gen(node->rhs);
+		printf("  jmp .Lbegin%d\n", node->label_num);
+		printf(".Lend%d:\n", node->label_num);
 		return;
 	}
 

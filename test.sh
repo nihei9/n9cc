@@ -56,6 +56,7 @@ assert 10 "a=100;a-90;"
 assert 10 "a=b=100;b-90;"
 assert 10 "a=90;b=100;b-a;"
 assert 10 "foo=90;bar=100;bar-foo;"
+assert 11 "a=10; a = a + 1;"
 
 assert 1 "0; return 1;"
 assert 1 "return 1; return 0;"
@@ -72,5 +73,9 @@ assert 0 "a=100; if(a > 0) return 0; else return 1;"
 assert 1 "a=-1; if(a > 0) return 0; else return 1;"
 assert 8 "a=0; b=10; if(a > 0) return 9; else if (b <= 10) return 8; else return 7;"
 assert 7 "a=0; b=10; if(a > 0) return 9; else if (b < 10) return 8; else return 7;"
+
+assert 10 "a=0; while(a < 10) a = a + 1; return a;"
+assert 10 "a=0; while(1) if(a < 10) a = a + 1; else return a; return 0;"
+assert 0 "while(0) return 1; return 0;"
 
 echo OK
