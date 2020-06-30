@@ -66,5 +66,11 @@ assert 0 "a=100; if(a > 0) return 0; return 1;"
 assert 1 "a=100; if(a > 100) return 0; return 1;"
 assert 0 "a=100; b=200; if(a > 0) if(b > 100) return 0; return 1;"
 assert 1 "a=100; b=200; if(a > 0) if(b > 200) return 0; return 1;"
+assert 1 "a=100; if(a > 0) 0; return 1;"
+
+assert 0 "a=100; if(a > 0) return 0; else return 1;"
+assert 1 "a=-1; if(a > 0) return 0; else return 1;"
+assert 8 "a=0; b=10; if(a > 0) return 9; else if (b <= 10) return 8; else return 7;"
+assert 7 "a=0; b=10; if(a > 0) return 9; else if (b < 10) return 8; else return 7;"
 
 echo OK

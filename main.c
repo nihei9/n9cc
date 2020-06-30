@@ -9,6 +9,7 @@ typedef enum {
 			  TK_RESERVED,
 			  TK_RETURN,
 			  TK_IF,
+			  TK_ELSE,
 			  TK_IDENT,
 			  TK_NUM,
 			  TK_EOF,
@@ -148,6 +149,11 @@ Token *tokenize() {
 			p += 2;
 			continue;
 		}
+		if (strncmp(p, "else", 4) == 0 && !isalpha(*(p + 4))) {
+			cur = new_token(TK_ELSE, cur, p, 4);
+			p += 4;
+			continue;
+		}
 
 		if (isalpha(*p)) {
 			char *start = p;
@@ -188,9 +194,19 @@ Token *tokenize() {
 void print_tokens() {
 	printf("tokens:\n");
 	for (Token *tok = token; tok != NULL; tok = tok->next) {
+		char symbol[256];
+		if (tok->str) {
+			if (tok->len < 255) {
+				memcpy(symbol, tok->str, tok->len);
+				symbol[tok->len] = '\0';
+			} else {
+				strncpy(symbol, "too long symbol", 255);
+			}
+		}
+		
 		switch (tok->kind) {
 		case TK_RESERVED:
-			printf("  TK_RESERVED\n");
+			printf("  TK_RESERVED %s\n", symbol);
 			break;
 		case TK_RETURN:
 			printf("  TK_RETURN\n");
@@ -198,8 +214,11 @@ void print_tokens() {
 		case TK_IF:
 			printf("  TK_IF\n");
 			break;
+		case TK_ELSE:
+			printf("  TK_ELSE\n");
+			break;
 		case TK_IDENT:
-			printf("  TK_IDENT\n");
+			printf("  TK_IDENT %s\n", symbol);
 			break;
 		case TK_NUM:
 			printf("  TK_NUM %d\n", tok->val);
@@ -234,6 +253,7 @@ struct Node {
 	NodeKind kind;
 	Node *lhs;
 	Node *rhs;
+	Node *opt; // when kind is TK_IF, its else clause
 	int val;
 	int offset;
 	int label_num;
@@ -245,6 +265,16 @@ Node *new_node(NodeKind kind, Node *lhs, Node *rhs) {
 	node->kind = kind;
 	node->lhs = lhs;
 	node->rhs = rhs;
+	return node;
+}
+
+// new_node_if returns a new if statment node.
+Node *new_node_if(Node *cond, Node *true_stmt, Node *false_stmt) {
+	Node *node = calloc(1, sizeof(Node));
+	node->kind = ND_IF;
+	node->lhs = cond;
+	node->rhs = true_stmt;
+	node->opt = false_stmt;
 	return node;
 }
 
@@ -301,7 +331,7 @@ void program() {
 
 // stmt = expr ";"
 //      | "return" expr ";"
-//      | "if" "(" expr ")" stmt
+//      | "if" "(" expr ")" stmt ("else" stmt)?
 Node *stmt() {
 	if (consume_kw(TK_RETURN)) {
 		Node *node = new_node(ND_RETURN, expr(), NULL);
@@ -311,8 +341,12 @@ Node *stmt() {
 		expect("(");
 		Node *cond_node = expr();
 		expect(")");
-		Node *stmt_node = stmt();
-		Node *if_node = new_node(ND_IF, cond_node, stmt_node);
+		Node *true_stmt_node = stmt();
+		Node *false_stmt_node = NULL;
+		if (consume_kw(TK_ELSE)) {
+			false_stmt_node = stmt();
+		}
+		Node *if_node = new_node_if(cond_node, true_stmt_node, false_stmt_node);
 		if_node->label_num = label_num++;
 		return if_node;
 	}
@@ -491,12 +525,26 @@ void gen(Node *node) {
 		printf("  ret\n");
 		return;
 	case ND_IF:
+		// lhs: condition
+		// rhs: statement to execute when condition is true (if clause)
+		// opt: statement to execute when condition is false (else clause)
 		gen(node->lhs);
-		printf("  pop rax\n");
-		printf("  cmp rax, 0\n");
-		printf("  je .L%d\n", node->label_num);
-		gen(node->rhs);
-		printf(".L%d:\n", node->label_num);
+		if (node->opt) {
+			printf("  pop rax\n");
+			printf("  cmp rax, 0\n");
+			printf("  je .Lelse%d\n", node->label_num);
+			gen(node->rhs);
+			printf("  jmp .Lend%d\n", node->label_num);
+			printf(".Lelse%d:\n", node->label_num);
+			gen(node->opt);
+			printf(".Lend%d:\n", node->label_num);
+		} else {
+			printf("  pop rax\n");
+			printf("  cmp rax, 0\n");
+			printf("  je .Lend%d\n", node->label_num);
+			gen(node->rhs);
+			printf(".Lend%d:\n", node->label_num);
+		}
 		return;
 	}
 
