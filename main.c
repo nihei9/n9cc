@@ -185,7 +185,7 @@ Token *tokenize() {
 			continue;
 		}
 
-		if (strchr("<>+-*/()=;", *p)) {
+		if (strchr("<>+-*/()=;{}", *p)) {
 			cur = new_token(TK_RESERVED, cur, p++, 1);
 			continue;
 		}
@@ -260,11 +260,22 @@ typedef enum {
 			  ND_ASSIGN, // =
 			  ND_LVAR,   // local variable
 			  ND_NUM,    // integer
+
+			  ND_EXPR_SENTINEL, // The above nodes are expression. Don't use this for any node kind.
+			  
 			  ND_RETURN, // return
 			  ND_IF,     // if
 			  ND_WHILE,  // while
 			  ND_FOR,    // for
+			  ND_BLOCK,  // block
 } NodeKind;
+
+bool is_expr_node(NodeKind kind) {
+	if (kind < ND_EXPR_SENTINEL) {
+		return true;
+	}
+	return false;
+}
 
 typedef struct Node Node;
 
@@ -278,6 +289,7 @@ struct Node {
 	int val;
 	int offset;
 	int label_num;
+	Node *next;
 };
 
 // new_node returns a new node.
@@ -366,6 +378,7 @@ void program() {
 //      | "if" "(" expr ")" stmt ("else" stmt)?
 //      | "while" "(" expr ")" stmt
 //      | "for" "(" expr? ";" expr? ";" expr? ")" stmt
+//      | "{" stmt* "}"
 Node *stmt() {
 	if (consume_kw(TK_RETURN)) {
 		Node *node = new_node(ND_RETURN, expr(), NULL);
@@ -410,6 +423,15 @@ Node *stmt() {
 		Node *for_node = new_node_for(init_node, cond_node, increment_node, stmt());
 		for_node->label_num = label_num++;
 		return for_node;
+	} else if (consume("{")) {
+		Node head;
+		head.next = NULL;
+		Node *stmt_node = &head;
+		while(!consume("}")) {
+			stmt_node->next = stmt();
+			stmt_node = stmt_node->next;
+		}
+		return new_node(ND_BLOCK, head.next, NULL);
 	}
 	
 	Node *node = expr();
@@ -637,6 +659,16 @@ void gen(Node *node) {
 		printf("  jmp .Lbegin%d\n", node->label_num);
 		if (node->rhs) {
 			printf(".Lend%d:\n", node->label_num);
+		}
+		return;
+	case ND_BLOCK:
+		// lhs: list of statements
+		for (Node *stmt = node->lhs; stmt; stmt = stmt->next) {
+			gen(stmt);
+			// If `node` is an expression, discards its result;
+			if (is_expr_node(stmt->kind)) {
+				printf("  pop rax\n");
+			}
 		}
 		return;
 	}

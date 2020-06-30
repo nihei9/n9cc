@@ -84,4 +84,10 @@ assert 10 "for(a = 0; ; a = a + 1) if (a >= 10) return a; return 0;"
 assert 10 "for(a = 0; a < 10; ) a = a + 1; return a;"
 assert 10 "a = 0; for(;;) if (a < 10) a = a + 1; else return a;"
 
+assert 0 "{} return 0;"
+assert 0 "{return 0;}"
+assert 1 "{0; return 1;}"
+assert 10 "a=0; while(1) {if (a >= 10) return a; a = a + 1;}"
+assert 10 "for (i=0; i < 10; i = i + 1) {} return i;"
+
 echo OK
