@@ -12,6 +12,7 @@ typedef enum {
 			  TK_ELSE,
 			  TK_WHILE,
 			  TK_FOR,
+			  TK_BREAK,
 			  TK_IDENT,
 			  TK_NUM,
 			  TK_EOF,
@@ -166,6 +167,11 @@ Token *tokenize() {
 			p += 3;
 			continue;
 		}
+		if (strncmp(p, "break", 5) == 0 && !isalpha(*(p + 5))) {
+			cur = new_token(TK_BREAK, cur, p, 5);
+			p += 5;
+			continue;
+		}
 		
 		if (isalpha(*p)) {
 			char *start = p;
@@ -235,6 +241,9 @@ void print_tokens() {
 		case TK_FOR:
 			printf("  TK_FOR\n");
 			break;
+		case TK_BREAK:
+			printf("  TK_BREAK\n");
+			break;
 		case TK_IDENT:
 			printf("  TK_IDENT %s\n", symbol);
 			break;
@@ -262,11 +271,12 @@ typedef enum {
 			  ND_NUM,    // integer
 
 			  ND_EXPR_SENTINEL, // The above nodes are expression. Don't use this for any node kind.
-			  
+
 			  ND_RETURN, // return
 			  ND_IF,     // if
 			  ND_WHILE,  // while
 			  ND_FOR,    // for
+			  ND_BREAK,  // break
 			  ND_BLOCK,  // block
 } NodeKind;
 
@@ -378,6 +388,7 @@ void program() {
 //      | "if" "(" expr ")" stmt ("else" stmt)?
 //      | "while" "(" expr ")" stmt
 //      | "for" "(" expr? ";" expr? ";" expr? ")" stmt
+//      | "break" ";"
 //      | "{" stmt* "}"
 Node *stmt() {
 	if (consume_kw(TK_RETURN)) {
@@ -423,6 +434,10 @@ Node *stmt() {
 		Node *for_node = new_node_for(init_node, cond_node, increment_node, stmt());
 		for_node->label_num = label_num++;
 		return for_node;
+	} else if (consume_kw(TK_BREAK)) {
+		Node *node = new_node(ND_BREAK, NULL, NULL);
+		expect(";");
+		return node;
 	} else if (consume("{")) {
 		Node head;
 		head.next = NULL;
@@ -530,7 +545,9 @@ Node *unary() {
 	return primary();
 }
 
-// primary = "(" expr ")" | num
+// primary = "(" expr ")"
+//         | ident
+//         | num
 Node *primary() {
 	if (consume("(")) {
 		Node *node = expr();
@@ -577,7 +594,7 @@ void gen_lval(Node *node) {
 }
 
 // gen generates asembly.
-void gen(Node *node) {
+void gen(Node *node, char *breakLabel) {
 	if (node == NULL) {
 		return;
 	}
@@ -594,14 +611,14 @@ void gen(Node *node) {
 		return;
 	case ND_ASSIGN:
 		gen_lval(node->lhs);
-		gen(node->rhs);
+		gen(node->rhs, breakLabel);
 		printf("  pop rdi\n");
 		printf("  pop rax\n");
 		printf("  mov [rax], rdi\n");
 		printf("  push rdi\n");
 		return;
 	case ND_RETURN:
-		gen(node->lhs);
+		gen(node->lhs, breakLabel);
 		printf("  pop rax\n");
 		printf("  mov rsp, rbp\n");
 		printf("  pop rbp\n");
@@ -611,61 +628,74 @@ void gen(Node *node) {
 		// lhs: condition
 		// rhs: statement to execute when condition is true (if clause)
 		// opt1: statement to execute when condition is false (else clause) (optional)
-		gen(node->lhs);
+		gen(node->lhs, breakLabel);
 		if (node->opt1) {
 			printf("  pop rax\n");
 			printf("  cmp rax, 0\n");
 			printf("  je .Lelse%d\n", node->label_num);
-			gen(node->rhs);
+			gen(node->rhs, breakLabel);
 			printf("  jmp .Lend%d\n", node->label_num);
 			printf(".Lelse%d:\n", node->label_num);
-			gen(node->opt1);
+			gen(node->opt1, breakLabel);
 			printf(".Lend%d:\n", node->label_num);
 		} else {
 			printf("  pop rax\n");
 			printf("  cmp rax, 0\n");
 			printf("  je .Lend%d\n", node->label_num);
-			gen(node->rhs);
+			gen(node->rhs, breakLabel);
 			printf(".Lend%d:\n", node->label_num);
 		}
 		return;
-	case ND_WHILE:
+	case ND_WHILE: {
+		char breakLabel[256];
+		sprintf(breakLabel, ".Lend%d", node->label_num);
+		
 		// lhs: condition
 		// rhs: statement to execute when condition is true
 		printf(".Lbegin%d:\n", node->label_num);
-		gen(node->lhs);
+		gen(node->lhs, breakLabel);
 		printf("  pop rax\n");
 		printf("  cmp rax, 0\n");
-		printf("  je .Lend%d\n", node->label_num);
-		gen(node->rhs);
+		printf("  je %s\n", breakLabel);
+		gen(node->rhs, breakLabel);
 		printf("  jmp .Lbegin%d\n", node->label_num);
-		printf(".Lend%d:\n", node->label_num);
+		printf("%s:\n", breakLabel);
 		return;
-	case ND_FOR:
+	}
+	case ND_FOR: {
+		char breakLabel[256];
+		sprintf(breakLabel, ".Lend%d", node->label_num);
+		
 		// lhs: init (optional)
 		// rhs: condition (optional)
 		// opt1: increment (optional)
 		// opt2: statement to execute when condition is true
-		gen(node->lhs);
+		gen(node->lhs, breakLabel);
 		printf(".Lbegin%d:\n", node->label_num);
 		if (node->rhs) {
-			gen(node->rhs);
+			gen(node->rhs, breakLabel);
 			printf("  pop rax\n");
 			printf("  cmp rax, 0\n");
-			printf("  je .Lend%d\n", node->label_num);
+			printf("  je %s\n", breakLabel);
 		}
-		gen(node->opt2);
-		gen(node->opt1);
+		gen(node->opt2, breakLabel);
+		gen(node->opt1, breakLabel);
 		printf("  jmp .Lbegin%d\n", node->label_num);
-		if (node->rhs) {
-			printf(".Lend%d:\n", node->label_num);
-		}
+		// If the condition expression is missing, it seems that this label isn't required.
+		// But when the break statement is used in this for statement, this label is required to break from it.
+		printf("%s:\n", breakLabel);
 		return;
+	}
+	case ND_BREAK:
+		if (breakLabel == NULL || strlen(breakLabel) <= 0) {
+			error("`break` can only be used in for or while statement.");
+		}
+		printf("  jmp %s\n", breakLabel);
 	case ND_BLOCK:
 		// lhs: list of statements
 		for (Node *stmt = node->lhs; stmt; stmt = stmt->next) {
-			gen(stmt);
-			// If `node` is an expression, discards its result;
+			gen(stmt, breakLabel);
+			// If `node` is an expression, discards its result.
 			if (is_expr_node(stmt->kind)) {
 				printf("  pop rax\n");
 			}
@@ -673,8 +703,8 @@ void gen(Node *node) {
 		return;
 	}
 
-	gen(node->lhs);
-	gen(node->rhs);
+	gen(node->lhs, NULL);
+	gen(node->rhs, NULL);
 
 	printf("  pop rdi\n");
 	printf("  pop rax\n");
@@ -741,9 +771,12 @@ int main(int argc, char **argv) {
 	}
 
 	for (int i = 0; code[i]; i++) {
-		gen(code[i]);
+		gen(code[i], NULL);
 
-		printf("  pop rax\n");
+		// If `code[i]` is an expression, discards its result.
+		if (is_expr_node(code[i]->kind)) {
+			printf("  pop rax\n");
+		}
 	}
 
 	printf("  mov rsp, rbp\n");

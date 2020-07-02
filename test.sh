@@ -77,12 +77,18 @@ assert 7 "a=0; b=10; if(a > 0) return 9; else if (b < 10) return 8; else return 
 assert 10 "a=0; while(a < 10) a = a + 1; return a;"
 assert 10 "a=0; while(1) if(a < 10) a = a + 1; else return a; return 0;"
 assert 0 "while(0) return 1; return 0;"
+assert 10 "a=0; while(1) if (a >= 10) break; else a = a + 1; return a;"
+assert 10 "a=0; while(1) {if (a >= 10) {break;} else {a = a + 1;}} return a;"
+assert 10 "{a=0; while(1) {if (a >= 10) {break;} else {a = a + 1;}} return a;}"
 
 assert 10 "for(a = 0; a < 10; a = a + 1) 0; return a;"
 assert 10 "a=0; for(; a < 10; a = a + 1) 0; return a;"
 assert 10 "for(a = 0; ; a = a + 1) if (a >= 10) return a; return 0;"
 assert 10 "for(a = 0; a < 10; ) a = a + 1; return a;"
 assert 10 "a = 0; for(;;) if (a < 10) a = a + 1; else return a;"
+assert 10 "a = 0; for(;;) if (a >= 10) break; else a = a + 1; return a;"
+assert 10 "a = 0; for(;;) {if (a >= 10) {break;} else {a = a + 1;}} return a;"
+assert 10 "{a = 0; for(;;) {if (a >= 10) {break;} else {a = a + 1;}} return a;}"
 
 assert 0 "{} return 0;"
 assert 0 "{return 0;}"
