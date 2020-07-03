@@ -258,17 +258,18 @@ void print_tokens() {
 }
 
 typedef enum {
-			  ND_EQ,     // ==
-			  ND_NE,     // !=
-			  ND_LT,     // <
-			  ND_LE,     // <=
-			  ND_ADD,    // +
-			  ND_SUB,    // -
-			  ND_MUL,    // *
-			  ND_DIV,    // /
-			  ND_ASSIGN, // =
-			  ND_LVAR,   // local variable
-			  ND_NUM,    // integer
+			  ND_EQ,       // ==
+			  ND_NE,       // !=
+			  ND_LT,       // <
+			  ND_LE,       // <=
+			  ND_ADD,      // +
+			  ND_SUB,      // -
+			  ND_MUL,      // *
+			  ND_DIV,      // /
+			  ND_ASSIGN,   // =
+			  ND_LVAR,     // local variable
+			  ND_NUM,      // integer
+			  ND_FUNCCALL, // funccall
 
 			  ND_EXPR_SENTINEL, // The above nodes are expression. Don't use this for any node kind.
 
@@ -299,6 +300,7 @@ struct Node {
 	int val;
 	int offset;
 	int label_num;
+	char *func_name;
 	Node *next;
 };
 
@@ -332,11 +334,19 @@ Node *new_node_for(Node *init, Node *cond, Node *increment, Node *stmt) {
 	return node;
 }
 
-// new_node returns a new node that represents an integer.
+// new_node_num returns a new node that represents an integer.
 Node *new_node_num(int val) {
 	Node *node = calloc(1, sizeof(Node));
 	node->kind = ND_NUM;
 	node->val = val;
+	return node;
+}
+
+// new_node_funccall returns a new function call node.
+Node *new_node_funccall(char *func_name) {
+	Node *node = calloc(1, sizeof(Node));
+	node->kind = ND_FUNCCALL;
+	node->func_name = func_name;
 	return node;
 }
 
@@ -546,7 +556,7 @@ Node *unary() {
 }
 
 // primary = "(" expr ")"
-//         | ident
+//         | ident ("(" ")")?
 //         | num
 Node *primary() {
 	if (consume("(")) {
@@ -557,6 +567,14 @@ Node *primary() {
 
 	Token *tok = consume_ident();
 	if (tok) {
+		if (consume("(")) {
+			expect(")");
+			char func_name[256];
+			memcpy(func_name, tok->str, tok->len);
+			func_name[tok->len] = '\0';
+			return new_node_funccall(func_name);
+		}
+		
 		Node *node = calloc(1, sizeof(Node));
 		node->kind = ND_LVAR;
 
@@ -602,6 +620,10 @@ void gen(Node *node, char *breakLabel) {
 	switch (node->kind) {
 	case ND_NUM:
 		printf("  push %d\n", node->val);
+		return;
+	case ND_FUNCCALL:
+		printf("  call %s\n", node->func_name);
+		printf("  push rax\n");
 		return;
 	case ND_LVAR:
 		gen_lval(node);

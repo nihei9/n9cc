@@ -4,7 +4,7 @@ assert() {
 	input="$2"
 
 	./n9cc "$input" > tmp.s
-	cc -o tmp tmp.s
+	cc -o tmp tmp.s helper.c
 	./tmp
 	actual="$?"
 
@@ -95,5 +95,7 @@ assert 0 "{return 0;}"
 assert 1 "{0; return 1;}"
 assert 10 "a=0; while(1) {if (a >= 10) return a; a = a + 1;}"
 assert 10 "for (i=0; i < 10; i = i + 1) {} return i;"
+
+assert 42 "ret42();"
 
 echo OK
