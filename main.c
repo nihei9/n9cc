@@ -273,12 +273,13 @@ typedef enum {
 
 			  ND_EXPR_SENTINEL, // The above nodes are expression. Don't use this for any node kind.
 
-			  ND_RETURN, // return
-			  ND_IF,     // if
-			  ND_WHILE,  // while
-			  ND_FOR,    // for
-			  ND_BREAK,  // break
-			  ND_BLOCK,  // block
+			  ND_FUNCDEF, // function definition
+			  ND_RETURN,  // return
+			  ND_IF,      // if
+			  ND_WHILE,   // while
+			  ND_FOR,     // for
+			  ND_BREAK,   // break
+			  ND_BLOCK,   // block
 } NodeKind;
 
 bool is_expr_node(NodeKind kind) {
@@ -298,11 +299,128 @@ struct Node {
 	Node *opt1;
 	Node *opt2;
 	int val;
+	char *str;
 	int offset;
 	int label_num;
+	int func_id;
 	char *func_name;
 	Node *next;
 };
+
+void print_node(Node *node, int depth, char *prefix) {
+	if (!node) {
+		return;
+	}
+
+	for (int i = 0; i < depth; i++) {
+		printf("  ");
+	}
+	if (prefix) {
+		printf("%s: ", prefix);
+	}
+	
+	switch (node->kind) {
+	case ND_EQ:
+		printf("==\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_NE:
+		printf("!=\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_LT:
+		printf("<\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_LE:
+		printf("<=\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_ADD:
+		printf("+\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_SUB:
+		printf("-\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_MUL:
+		printf("*\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_DIV:
+		printf("/\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_ASSIGN:
+		printf("=\n");
+		print_node(node->lhs, depth + 1, "LHS");
+		print_node(node->rhs, depth + 1, "RHS");
+		break;
+	case ND_LVAR:
+		printf("VARIABLE: (offset) %d\n", node->offset);
+		break;
+	case ND_NUM:
+		printf("NUMBER: %d\n", node->val);
+		break;
+	case ND_FUNCCALL:
+		printf("CALL: %s\n", node->func_name);
+		print_node(node->lhs, depth + 1, "PARAMETER");
+		break;
+	case ND_FUNCDEF:
+		printf("FUNCTION: #%d %s\n", node->func_id, node->func_name);
+		print_node(node->lhs, depth + 1, "ARGUMENT");
+		print_node(node->rhs, depth + 1, NULL);
+		break;
+	case ND_RETURN:
+		printf("RETURN\n");
+		print_node(node->lhs, depth + 1, NULL);
+		break;
+	case ND_IF:
+		printf("IF\n");
+		print_node(node->lhs, depth + 1, "CONDITION");
+		print_node(node->rhs, depth + 1, "IF CLAUSE");
+		print_node(node->opt1, depth + 1, "ELSE CLAUSE");
+		break;
+	case ND_WHILE:
+		printf("WHILE\n");
+		print_node(node->lhs, depth + 1, "CONDITION");
+		break;
+	case ND_FOR:
+		printf("FOR\n");
+		print_node(node->lhs, depth + 1, "INIT");
+		print_node(node->rhs, depth + 1, "CONDITION");
+		print_node(node->opt1, depth + 1, "INCREMENT");
+		print_node(node->opt2, depth + 1, "BODY");
+		break;
+	case ND_BREAK:
+		printf("BREAK\n");
+		break;
+	case ND_BLOCK:
+		printf("BLOCK\n");
+		print_node(node->lhs, depth + 1, NULL);
+		break;
+	default:
+		printf("UNKNOWN NODE KIND: %d\n", node->kind);
+		break;
+	}
+
+	print_node(node->next, depth, prefix);
+}
+
+void print_code(Node **code) {
+	for (int i = 0; code[i]; i++) {
+		print_node(code[i], 0, NULL);
+	}
+}
 
 // new_node returns a new node.
 Node *new_node(NodeKind kind, Node *lhs, Node *rhs) {
@@ -360,10 +478,11 @@ struct LVar {
 	int offset;
 };
 
-LVar *locals;
+int func_id;
+LVar *locals[100];
 
-LVar *find_lvar(Token *tok) {
-	for (LVar *var = locals; var; var = var->next) {
+LVar *find_lvar(int func_id, Token *tok) {
+	for (LVar *var = locals[func_id]; var; var = var->next) {
 		if (var->len == tok->len && !memcmp(tok->str, var->name, var->len)) {
 			return var;
 		}
@@ -372,6 +491,7 @@ LVar *find_lvar(Token *tok) {
 }
 
 void program();
+Node *func_def();
 Node *stmt();
 Node *expr();
 Node *assign();
@@ -385,13 +505,83 @@ Node *primary();
 Node *code[100];
 int label_num;
 
-// program = stmt*
+// program = func_def+
 void program() {
 	int i = 0;
 	while (!at_eof()) {
-		code[i++] = stmt();
+		code[i++] = func_def();
 	}
 	code[i] = NULL;
+
+	if (code[0] == NULL) {
+		error("expected function definition at least one");
+	}
+}
+
+// func_def: ident "(" (ident ("," ident)*)? ")" "{" stmt* "}"
+Node *func_def() {
+	Token *id_tok = consume_ident();
+	if (!id_tok) {
+		error("expected an identifier");
+	}
+
+	expect("(");
+	Node args;
+	args.next = NULL;
+	Node *arg = &args;
+	while (!consume(")")) {
+		Token *arg_tok = consume_ident();
+		if (!arg_tok) {
+			error("expected an identifier");
+		}
+
+		Node *decl = calloc(1, sizeof(Node));
+		decl->kind = ND_LVAR;
+
+		LVar *lvar = find_lvar(func_id, arg_tok);
+		if (lvar) {
+			decl->offset = lvar->offset;
+		} else {
+			lvar = calloc(1, sizeof(LVar));
+			lvar->next = locals[func_id];
+			lvar->name = arg_tok->str;
+			lvar->len = arg_tok->len;
+			if (locals[func_id]) {
+				lvar->offset = locals[func_id]->offset + 8;
+			} else {
+				lvar->offset = 8;
+			}
+			locals[func_id] = lvar;
+			decl->offset = lvar->offset;
+		}
+
+		arg->next = decl;
+		arg = arg->next;
+		if (consume(")")) {
+			break;
+		}
+		expect(",");
+	}
+
+	expect("{");
+	Node block_head;
+	block_head.next = NULL;
+	Node *stmt_node = &block_head;
+	while(!consume("}")) {
+		stmt_node->next = stmt();
+		stmt_node = stmt_node->next;
+	}
+	Node *block_node = new_node(ND_BLOCK, block_head.next, NULL);
+
+	char *func_name = calloc(id_tok->len + 1, sizeof(char));
+	memcpy(func_name, id_tok->str, id_tok->len);
+	func_name[id_tok->len] = '\0';
+	
+	Node *node = new_node(ND_FUNCDEF, args.next, block_node);
+	node->func_id = func_id++;
+	node->func_name = func_name;
+
+	return node;
 }
 
 // stmt = expr ";"
@@ -557,7 +747,7 @@ Node *unary() {
 }
 
 // primary = "(" expr ")"
-//         | ident ("(" ")")?
+//         | ident ("(" (expr ("," expr)*)? ")")?
 //         | num
 Node *primary() {
 	if (consume("(")) {
@@ -580,7 +770,7 @@ Node *primary() {
 				}
 				expect(",");
 			};
-			char func_name[256];
+			char *func_name = calloc(tok->len + 1, sizeof(char));
 			memcpy(func_name, tok->str, tok->len);
 			func_name[tok->len] = '\0';
 			return new_node_funccall(func_name, params.next);
@@ -589,20 +779,20 @@ Node *primary() {
 		Node *node = calloc(1, sizeof(Node));
 		node->kind = ND_LVAR;
 
-		LVar *lvar = find_lvar(tok);
+		LVar *lvar = find_lvar(func_id, tok);
 		if (lvar) {
 			node->offset = lvar->offset;
 		} else {
 			lvar = calloc(1, sizeof(LVar));
-			lvar->next = locals;
+			lvar->next = locals[func_id];
 			lvar->name = tok->str;
 			lvar->len = tok->len;
-			if (locals) {
-				lvar->offset = locals->offset + 8;
+			if (locals[func_id]) {
+				lvar->offset = locals[func_id]->offset + 8;
 			} else {
 				lvar->offset = 8;
 			}
-			locals = lvar;
+			locals[func_id] = lvar;
 			node->offset = lvar->offset;
 		}
 
@@ -750,6 +940,7 @@ void gen(Node *node, char *breakLabel) {
 			error("`break` can only be used in for or while statement.");
 		}
 		printf("  jmp %s\n", breakLabel);
+		return;
 	case ND_BLOCK:
 		// lhs: list of statements
 		for (Node *stmt = node->lhs; stmt; stmt = stmt->next) {
@@ -814,32 +1005,85 @@ int main(int argc, char **argv) {
 	}
 	
 	user_input = argv[1];
+	//	printf("# tokenizing start\n");
 	token = tokenize();
+	//	printf("# tokenizing finished\n");
 	//	print_tokens();
+	//	printf("# parsing start\n");
 	program();
+	//	printf("# parsing finished\n");
+	//	print_code(code);
 
-	printf(".intel_syntax noprefix\n");
-	printf(".global main\n");
-	printf("main:\n");
+	//	printf("# code generation start\n");
 
-	printf("  push rbp\n");
-	printf("  mov rbp, rsp\n");
-	
-	if (locals) {
-		printf("  sub rsp, %d\n", locals->offset);
-	}
-
+	bool main_found = false;
 	for (int i = 0; code[i]; i++) {
-		gen(code[i], NULL);
-
-		// If `code[i]` is an expression, discards its result.
-		if (is_expr_node(code[i]->kind)) {
-			printf("  pop rax\n");
+		Node *node = code[i];
+		if (node->kind != ND_FUNCDEF) {
+			continue;
+		}
+		if (strncmp(node->func_name, "main", 4) == 0) {
+			main_found = true;
+			break;
 		}
 	}
+	if (!main_found) {
+		error("main function is not found");
+	}
 
-	printf("  mov rsp, rbp\n");
-	printf("  pop rbp\n");
-	printf("  ret\n");
+	printf(".intel_syntax noprefix\n");
+
+	for (int i = 0; code[i]; i++) {
+		Node *node = code[i];
+		if (node->kind != ND_FUNCDEF) {
+			continue;
+		}
+
+		printf(".global %s\n", node->func_name);
+		printf("%s:\n", node->func_name);
+		printf("  push rbp\n");
+		printf("  mov rbp, rsp\n");
+
+		if (locals[node->func_id]) {
+			printf("  sub rsp, %d\n", locals[node->func_id]->offset);
+		}
+
+		int nth = 1;
+		for (Node *arg = node->lhs; arg; arg = arg->next) {
+			gen_lval(arg);
+			printf("  pop rax\n");
+			
+			switch (nth) {
+			case 1:
+				printf("  mov [rax], rdi\n");
+				break;
+			case 2:
+				printf("  mov [rax], rsi\n");
+				break;
+			case 3:
+				printf("  mov [rax], rdx\n");
+				break;
+			case 4:
+				printf("  mov [rax], rcx\n");
+				break;
+			case 5:
+				printf("  mov [rax], r8\n");
+				break;
+			case 6:
+				printf("  mov [rax], r9\n");
+				break;
+			}
+			nth++;
+		}
+
+		gen(node->rhs, NULL);
+
+		printf("  mov rsp, rbp\n");
+		printf("  pop rbp\n");
+		printf("  ret\n");
+	}
+
+	//	printf("# code generation finished\n");
+	
 	return 0;
 }
