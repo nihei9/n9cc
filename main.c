@@ -191,7 +191,7 @@ Token *tokenize() {
 			continue;
 		}
 
-		if (strchr("<>+-*/()=;{}", *p)) {
+		if (strchr("<>+-*/()=,;{}", *p)) {
 			cur = new_token(TK_RESERVED, cur, p++, 1);
 			continue;
 		}
@@ -343,10 +343,11 @@ Node *new_node_num(int val) {
 }
 
 // new_node_funccall returns a new function call node.
-Node *new_node_funccall(char *func_name) {
+Node *new_node_funccall(char *func_name, Node *params) {
 	Node *node = calloc(1, sizeof(Node));
 	node->kind = ND_FUNCCALL;
 	node->func_name = func_name;
+	node->lhs = params;
 	return node;
 }
 
@@ -568,11 +569,21 @@ Node *primary() {
 	Token *tok = consume_ident();
 	if (tok) {
 		if (consume("(")) {
-			expect(")");
+			Node params;
+			params.next = NULL;
+			Node *p = &params;
+			while (!consume(")")) {
+				p->next = expr();
+				p = p->next;
+				if (consume(")")) {
+					break;
+				}
+				expect(",");
+			};
 			char func_name[256];
 			memcpy(func_name, tok->str, tok->len);
 			func_name[tok->len] = '\0';
-			return new_node_funccall(func_name);
+			return new_node_funccall(func_name, params.next);
 		}
 		
 		Node *node = calloc(1, sizeof(Node));
@@ -621,10 +632,36 @@ void gen(Node *node, char *breakLabel) {
 	case ND_NUM:
 		printf("  push %d\n", node->val);
 		return;
-	case ND_FUNCCALL:
+	case ND_FUNCCALL: {
+		int nth = 1;
+		for (Node *param = node->lhs; param; param = param->next) {
+			gen(param, NULL);
+			switch (nth) {
+			case 1:
+				printf("  pop rdi\n");
+				break;
+			case 2:
+				printf("  pop rsi\n");
+				break;
+			case 3:
+				printf("  pop rdx\n");
+				break;
+			case 4:
+				printf("  pop rcx\n");
+				break;
+			case 5:
+				printf("  pop r8\n");
+				break;
+			case 6:
+				printf("  pop r9\n");
+				break;
+			}
+			nth++;
+		}
 		printf("  call %s\n", node->func_name);
 		printf("  push rax\n");
 		return;
+	}
 	case ND_LVAR:
 		gen_lval(node);
 		printf("  pop rax\n");

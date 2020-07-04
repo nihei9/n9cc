@@ -97,5 +97,11 @@ assert 10 "a=0; while(1) {if (a >= 10) return a; a = a + 1;}"
 assert 10 "for (i=0; i < 10; i = i + 1) {} return i;"
 
 assert 42 "ret42();"
+assert 42 "id(42);"
+assert 42 "add2(41, 1);"
+assert 42 "add3(39, 2, 1);"
+assert 42 "add4(36, 3, 2, 1);"
+assert 42 "add5(32, 4, 3, 2, 1);"
+assert 42 "add6(27, 5, 4, 3, 2, 1);"
 
 echo OK
