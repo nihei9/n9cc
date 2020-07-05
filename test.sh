@@ -109,4 +109,7 @@ assert 42 "r20(){return 20;} r22(){return 22;} main(){return r20() + r22();}"
 assert 42 "sub(a, b){return a - b;} main(){return sub(100, 58);}"
 assert 12 "fib(n){if (n == 0) {return 0;} else if (n == 1) {return 1;} return fib(n - 1) + fib(n -2);} main(){n = 0; for (i = 0; i <= 5; i = i + 1) {n = n + fib(i);} return n;}"
 
+assert 42 "main(){a=42; b=&a; return *b;}"
+assert 42 "main(){a=42; b=&a; c=&b; return **c;}"
+
 echo OK

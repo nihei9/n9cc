@@ -191,7 +191,7 @@ Token *tokenize() {
 			continue;
 		}
 
-		if (strchr("<>+-*/()=,;{}", *p)) {
+		if (strchr("<>+-*/&()=,;{}", *p)) {
 			cur = new_token(TK_RESERVED, cur, p++, 1);
 			continue;
 		}
@@ -270,6 +270,8 @@ typedef enum {
 			  ND_LVAR,     // local variable
 			  ND_NUM,      // integer
 			  ND_FUNCCALL, // funccall
+			  ND_ADDR,     // &
+			  ND_DEREF,    // * (dereference)
 
 			  ND_EXPR_SENTINEL, // The above nodes are expression. Don't use this for any node kind.
 
@@ -374,6 +376,14 @@ void print_node(Node *node, int depth, char *prefix) {
 	case ND_FUNCCALL:
 		printf("CALL: %s\n", node->func_name);
 		print_node(node->lhs, depth + 1, "PARAMETER");
+		break;
+	case ND_ADDR:
+		printf("ADDRESS\n");
+		print_node(node->lhs, depth + 1, NULL);
+		break;
+	case ND_DEREF:
+		printf("DEREFERENCE\n");
+		print_node(node->lhs, depth + 1, NULL);
 		break;
 	case ND_FUNCDEF:
 		printf("FUNCTION: #%d %s\n", node->func_id, node->func_name);
@@ -734,7 +744,7 @@ Node *mul() {
 	}
 }
 
-// unary = ("+" | "-")? unary
+// unary = ("+" | "-" | "&" | "*")? unary
 //       | primary
 Node *unary() {
 	if (consume("+")) {
@@ -742,6 +752,12 @@ Node *unary() {
 	}
 	if (consume("-")) {
 		return new_node(ND_SUB, new_node_num(0), unary());
+	}
+	if (consume("&")) {
+		return new_node(ND_ADDR, unary(), NULL);
+	}
+	if (consume("*")) {
+		return new_node(ND_DEREF, unary(), NULL);
 	}
 	return primary();
 }
@@ -865,6 +881,15 @@ void gen(Node *node, char *breakLabel) {
 		printf("  pop rax\n");
 		printf("  mov [rax], rdi\n");
 		printf("  push rdi\n");
+		return;
+	case ND_ADDR:
+		gen_lval(node->lhs);
+		return;
+	case ND_DEREF:
+		gen(node->lhs, NULL);
+		printf("  pop rax\n");
+		printf("  mov rax, [rax]\n");
+		printf("  push rax\n");
 		return;
 	case ND_RETURN:
 		gen(node->lhs, breakLabel);
