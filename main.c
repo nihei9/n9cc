@@ -7,6 +7,7 @@
 
 typedef enum {
 			  TK_RESERVED,
+			  TK_INT,
 			  TK_RETURN,
 			  TK_IF,
 			  TK_ELSE,
@@ -142,6 +143,11 @@ Token *tokenize() {
 			continue;
 		}
 
+		if (strncmp(p, "int", 3) == 0 && !isalpha(*(p + 3))) {
+			cur = new_token(TK_INT, cur, p, 3);
+			p += 3;
+			continue;
+		}
 		if (strncmp(p, "return", 6) == 0 && !isalpha(*(p + 6))) {
 			cur = new_token(TK_RETURN, cur, p, 6);
 			p += 6;
@@ -528,8 +534,12 @@ void program() {
 	}
 }
 
-// func_def: ident "(" (ident ("," ident)*)? ")" "{" stmt* "}"
+// func_def: "int" ident "(" ("int" ident ("," "int" ident)*)? ")" "{" stmt* "}"
 Node *func_def() {
+	if (!consume_kw(TK_INT)) {
+		error("expected `int`");
+	}
+	
 	Token *id_tok = consume_ident();
 	if (!id_tok) {
 		error("expected an identifier");
@@ -540,6 +550,10 @@ Node *func_def() {
 	args.next = NULL;
 	Node *arg = &args;
 	while (!consume(")")) {
+		if (!consume_kw(TK_INT)) {
+			error("expected `int`");
+		}
+		
 		Token *arg_tok = consume_ident();
 		if (!arg_tok) {
 			error("expected an identifier");
@@ -601,6 +615,7 @@ Node *func_def() {
 //      | "for" "(" expr? ";" expr? ";" expr? ")" stmt
 //      | "break" ";"
 //      | "{" stmt* "}"
+//      | "int" ident ";"
 Node *stmt() {
 	if (consume_kw(TK_RETURN)) {
 		Node *node = new_node(ND_RETURN, expr(), NULL);
@@ -658,6 +673,33 @@ Node *stmt() {
 			stmt_node = stmt_node->next;
 		}
 		return new_node(ND_BLOCK, head.next, NULL);
+	} else if (consume_kw(TK_INT)) {
+		Token *id_tok = consume_ident();
+		if (!id_tok) {
+			error("expected an identifier");
+		}
+
+		Node *node = calloc(1, sizeof(Node));
+		node->kind = ND_LVAR;
+
+		LVar *lvar = find_lvar(func_id, id_tok);
+		if (lvar) {
+			node->offset = lvar->offset;
+		} else {
+			lvar = calloc(1, sizeof(LVar));
+			lvar->next = locals[func_id];
+			lvar->name = id_tok->str;
+			lvar->len = id_tok->len;
+			if (locals[func_id]) {
+				lvar->offset = locals[func_id]->offset + 8;
+			} else {
+				lvar->offset = 8;
+			}
+			locals[func_id] = lvar;
+			node->offset = lvar->offset;
+		}
+		expect(";");
+		return node;
 	}
 	
 	Node *node = expr();
@@ -791,26 +833,18 @@ Node *primary() {
 			func_name[tok->len] = '\0';
 			return new_node_funccall(func_name, params.next);
 		}
-		
-		Node *node = calloc(1, sizeof(Node));
-		node->kind = ND_LVAR;
 
 		LVar *lvar = find_lvar(func_id, tok);
-		if (lvar) {
-			node->offset = lvar->offset;
-		} else {
-			lvar = calloc(1, sizeof(LVar));
-			lvar->next = locals[func_id];
-			lvar->name = tok->str;
-			lvar->len = tok->len;
-			if (locals[func_id]) {
-				lvar->offset = locals[func_id]->offset + 8;
-			} else {
-				lvar->offset = 8;
-			}
-			locals[func_id] = lvar;
-			node->offset = lvar->offset;
+		if (!lvar) {
+			char var[256];
+			memcpy(var, tok->str, tok->len);
+			var[tok->len] = '\0';
+			error("use of undefined variable: %s", var);
 		}
+
+		Node *node = calloc(1, sizeof(Node));
+		node->kind = ND_LVAR;
+		node->offset = lvar->offset;
 
 		return node;
 	}
