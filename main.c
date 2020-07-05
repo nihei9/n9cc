@@ -553,6 +553,8 @@ Node *func_def() {
 		if (!consume_kw(TK_INT)) {
 			error("expected `int`");
 		}
+
+		while (consume("*"));
 		
 		Token *arg_tok = consume_ident();
 		if (!arg_tok) {
@@ -615,7 +617,7 @@ Node *func_def() {
 //      | "for" "(" expr? ";" expr? ";" expr? ")" stmt
 //      | "break" ";"
 //      | "{" stmt* "}"
-//      | "int" ident ";"
+//      | "int" "*"* ident ";"
 Node *stmt() {
 	if (consume_kw(TK_RETURN)) {
 		Node *node = new_node(ND_RETURN, expr(), NULL);
@@ -674,6 +676,8 @@ Node *stmt() {
 		}
 		return new_node(ND_BLOCK, head.next, NULL);
 	} else if (consume_kw(TK_INT)) {
+		while (consume("*"));
+		
 		Token *id_tok = consume_ident();
 		if (!id_tok) {
 			error("expected an identifier");
@@ -852,14 +856,22 @@ Node *primary() {
 	return new_node_num(expect_number());
 }
 
-void gen_lval(Node *node) {
-	if (node->kind != ND_LVAR) {
-		error("left value must be a variable");
-	}
+void gen(Node *node, char *breakLabel);
 
-	printf("  mov rax, rbp\n");
-	printf("  sub rax, %d\n", node->offset);
-	printf("  push rax\n");
+void gen_lval(Node *node) {
+	switch (node->kind) {
+	case ND_LVAR:
+		printf("  mov rax, rbp\n");
+		printf("  sub rax, %d\n", node->offset);
+		printf("  push rax\n");
+		break;
+	case ND_DEREF:
+		gen(node->lhs, NULL);
+		break;
+	default:
+		error("left value must be a variable or a dereference");
+		break;
+	}
 }
 
 // gen generates asembly.
@@ -870,9 +882,13 @@ void gen(Node *node, char *breakLabel) {
 
 	switch (node->kind) {
 	case ND_NUM:
+		printf("  # number starts\n");
 		printf("  push %d\n", node->val);
+		printf("  # number ends\n");
 		return;
 	case ND_FUNCCALL: {
+		printf("  # calling starts\n");
+		
 		int nth = 1;
 		for (Node *param = node->lhs; param; param = param->next) {
 			gen(param, NULL);
@@ -900,39 +916,51 @@ void gen(Node *node, char *breakLabel) {
 		}
 		printf("  call %s\n", node->func_name);
 		printf("  push rax\n");
+		printf("  # calling ends\n");
 		return;
 	}
 	case ND_LVAR:
+		printf("  # lvar starts\n");
 		gen_lval(node);
 		printf("  pop rax\n");
 		printf("  mov rax, [rax]\n");
 		printf("  push rax\n");
+		printf("  # lvar ends\n");
 		return;
 	case ND_ASSIGN:
+		printf("  # assign starts\n");
 		gen_lval(node->lhs);
 		gen(node->rhs, breakLabel);
 		printf("  pop rdi\n");
 		printf("  pop rax\n");
 		printf("  mov [rax], rdi\n");
 		printf("  push rdi\n");
+		printf("  # assign ends\n");
 		return;
 	case ND_ADDR:
+		printf("  # address starts\n");
 		gen_lval(node->lhs);
+		printf("  # address ends\n");
 		return;
 	case ND_DEREF:
+		printf("  # dereference starts\n");
 		gen(node->lhs, NULL);
 		printf("  pop rax\n");
 		printf("  mov rax, [rax]\n");
 		printf("  push rax\n");
+		printf("  # dereference ends\n");
 		return;
 	case ND_RETURN:
+		printf("  # return starts\n");
 		gen(node->lhs, breakLabel);
 		printf("  pop rax\n");
 		printf("  mov rsp, rbp\n");
 		printf("  pop rbp\n");
 		printf("  ret\n");
+		printf("  # return ends\n");
 		return;
 	case ND_IF:
+		printf("  # if starts\n");
 		// lhs: condition
 		// rhs: statement to execute when condition is true (if clause)
 		// opt1: statement to execute when condition is false (else clause) (optional)
@@ -953,8 +981,11 @@ void gen(Node *node, char *breakLabel) {
 			gen(node->rhs, breakLabel);
 			printf(".Lend%d:\n", node->label_num);
 		}
+		printf("  # if ends\n");
 		return;
 	case ND_WHILE: {
+		printf("  # while starts\n");
+		
 		char breakLabel[256];
 		sprintf(breakLabel, ".Lend%d", node->label_num);
 		
@@ -968,9 +999,12 @@ void gen(Node *node, char *breakLabel) {
 		gen(node->rhs, breakLabel);
 		printf("  jmp .Lbegin%d\n", node->label_num);
 		printf("%s:\n", breakLabel);
+		printf("  # while ends\n");
 		return;
 	}
 	case ND_FOR: {
+		printf("  # for starts\n");
+		
 		char breakLabel[256];
 		sprintf(breakLabel, ".Lend%d", node->label_num);
 		
@@ -992,15 +1026,21 @@ void gen(Node *node, char *breakLabel) {
 		// If the condition expression is missing, it seems that this label isn't required.
 		// But when the break statement is used in this for statement, this label is required to break from it.
 		printf("%s:\n", breakLabel);
+		printf("  # for ends\n");
 		return;
 	}
 	case ND_BREAK:
+		printf("  # break starts\n");
+		
 		if (breakLabel == NULL || strlen(breakLabel) <= 0) {
 			error("`break` can only be used in for or while statement.");
 		}
 		printf("  jmp %s\n", breakLabel);
+		printf("  # break ends\n");
 		return;
 	case ND_BLOCK:
+		printf("  # block starts\n");
+		
 		// lhs: list of statements
 		for (Node *stmt = node->lhs; stmt; stmt = stmt->next) {
 			gen(stmt, breakLabel);
@@ -1009,6 +1049,7 @@ void gen(Node *node, char *breakLabel) {
 				printf("  pop rax\n");
 			}
 		}
+		printf("  # block ends\n");
 		return;
 	}
 

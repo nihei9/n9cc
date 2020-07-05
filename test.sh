@@ -107,7 +107,11 @@ assert 42 "int r20(){return 20;} int r22(){return 22;} int main(){return r20() +
 assert 42 "int sub(int a, int b){return a - b;} int main(){return sub(100, 58);}"
 assert 12 "int fib(int n){if (n == 0) {return 0;} else if (n == 1) {return 1;} return fib(n - 1) + fib(n -2);} int main(){int n; int i; n = 0; for (i = 0; i <= 5; i = i + 1) {n = n + fib(i);} return n;}"
 
-assert 42 "int main(){int a; int b; a=42; b=&a; return *b;}"
-assert 42 "int main(){int a; int b; int c; a=42; b=&a; c=&b; return **c;}"
+assert 42 "int main(){int a; int *b; a=42; b=&a; return *b;}"
+assert 42 "int main(){int a; int *b; int **c; a=42; b=&a; c=&b; return **c;}"
+assert 42 "int main(){int a; int *b; b=&a; *b=42; return a;}"
+assert 42 "int main(){int a; int *b; int **c; b=&a; c=&b; **c=42; return a;}"
+assert 42 "int assign(int *var, int n){return *var=n;} int main(){int a; assign(&a, 42); return a;}"
+assert 42 "int assign(int **var, int n){return **var=n;} int main(){int a; int b; b=&a; assign(&b, 42); return a;}"
 
 echo OK
